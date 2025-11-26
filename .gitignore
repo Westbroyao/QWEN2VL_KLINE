@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual env
+venv/
+.env/
+
+# Data & models (按需调整)
+data_raw/
+data_proc/
+data_images/
+checkpoints/
+outputs/
+logs/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
