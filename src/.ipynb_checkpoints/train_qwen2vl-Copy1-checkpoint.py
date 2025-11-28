@@ -15,7 +15,7 @@ from transformers import (
     BitsAndBytesConfig,
 )
 from peft import LoraConfig, get_peft_model
-from qwen_vl_utils import process_vision_info
+from PIL import Image
 
 
 # ----------------- 一些超参数，可以按需改 -----------------
@@ -40,37 +40,58 @@ DEVICE_MAP = "auto"
 
 # ----------------- 自定义数据集 & 预处理 -----------------
 
-def add_file_prefix_for_images(messages):
+
+def add_file_prefix_for_images(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    把 user 消息中的本地图片路径补成 file:// 绝对路径，
-    并过滤掉 image 字段为 None 或不是字符串的条目。
+    Qwen 官方支持本地路径：形如 'file:///abs/path/to/img.png'
+    你在 JSON 里目前是相对路径，如 'kline_windows/window_00000_up.png'，
+    这里统一加上 'file://+' 绝对路径。
     """
     new_messages = []
     for msg in messages:
-        contents = msg.get("content", [])
-        if not isinstance(contents, list):
+        if msg["role"] != "user":
             new_messages.append(msg)
             continue
+        new_content = []
+        for item in msg["content"]:
+            if item.get("type") == "image":
+                path = item["image"]
+                # 如果还不是 file:// 开头，则转成绝对路径
+                if not path.startswith("file://"):
+                    abs_path = os.path.abspath(path)
+                    item = {
+                        **item,
+                        "image": "file://" + abs_path
+                    }
+            new_content.append(item)
+        new_messages.append({**msg, "content": new_content})
+    return new_messages
 
-        clean_content = []
+def extract_pil_images(messages: List[Dict[str, Any]]) -> List[Image.Image]:
+    """
+    从 messages 里提取所有 image 项，读取为 PIL.Image。
+    只处理本地文件，不支持 http/https。
+    """
+    images: List[Image.Image] = []
+    for msg in messages:
+        contents = msg.get("content", [])
+        if not isinstance(contents, list):
+            continue
+
         for item in contents:
             if isinstance(item, dict) and item.get("type") == "image":
                 path = item.get("image", None)
-
-                # 只保留非空字符串路径
                 if not isinstance(path, str) or path.strip() == "":
-                    # 直接丢掉这条 image 项
-                    continue
+                    continue   # 忽略非法项
 
-                if not path.startswith("file://"):
-                    abs_path = os.path.abspath(path)
-                    item = {**item, "image": "file://" + abs_path}
+                # 去掉 file:// 前缀
+                if path.startswith("file://"):
+                    path = path[len("file://"):]
 
-            clean_content.append(item)
-
-        new_messages.append({**msg, "content": clean_content})
-
-    return new_messages
+                # 读取图片
+                img = Image.open(path).convert("RGB")
+                images.append(img)
+    return images
 
 
 def build_training_example(
@@ -85,33 +106,44 @@ def build_training_example(
     """
     messages = example["messages"]
 
-    # 1) 补全 file:// 前缀 + 过滤非法 image
+    # 1) 先把 image 路径补成 file:// 绝对路径
     messages = add_file_prefix_for_images(messages)
 
-    # 2) 文本：用 chat template 拼成一个字符串
+    # 2) 从 messages 里抽出所有图片，读成 PIL.Image
+    pil_images = extract_pil_images(messages)   # List[Image]
+
+    # 3) 文本：用 chat template
     text = processor.apply_chat_template(
         messages,
         tokenize=False,
         add_generation_prompt=False,
     )
 
-    # 3) 用官方工具从 messages 里解析出视觉信息（关键）
-    image_inputs, video_inputs = process_vision_info(messages)
+    # 4) 让 processor 同时处理 text + images
+    if len(pil_images) == 0:
+        # 没图也行，只是纯文本
+        model_inputs = processor(
+            text=[text],
+            padding="max_length",
+            max_length=MAX_LENGTH,
+            truncation=True,
+            return_tensors="pt",
+        )
+    else:
+        model_inputs = processor(
+            text=[text],
+            images=pil_images,
+            padding="max_length",
+            max_length=MAX_LENGTH,
+            truncation=True,
+            return_tensors="pt",
+        )
 
-    # 4) 统一交给 AutoProcessor 处理
-    model_inputs = processor(
-        text=[text],
-        images=image_inputs,
-        videos=video_inputs,
-        padding="max_length",
-        max_length=MAX_LENGTH,
-        truncation=True,
-        return_tensors="pt",
-    )
-
-    # batch_size=1，这里直接取第 0 个
+    # batch_size=1，这里直接取第0个
     input_ids = model_inputs["input_ids"][0]
     attention_mask = model_inputs["attention_mask"][0]
+
+    # Qwen2-VL 的视觉特征字段名通常是 pixel_values
     pixel_values = model_inputs["pixel_values"][0]
 
     # 简单做法：labels = input_ids
@@ -123,6 +155,7 @@ def build_training_example(
         "pixel_values": pixel_values,
         "labels": labels,
     }
+
 
 
 class QwenKlineDataset(Dataset):

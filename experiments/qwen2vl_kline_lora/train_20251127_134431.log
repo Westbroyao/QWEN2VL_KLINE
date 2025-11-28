@@ -1,0 +1,46 @@
+Generating train split: 0 examples [00:00, ? examples/s]Generating train split: 80 examples [00:00, 1424.99 examples/s]
+Generating validation split: 0 examples [00:00, ? examples/s]Generating validation split: 20 examples [00:00, 1855.39 examples/s]
+`torch_dtype` is deprecated! Use `dtype` instead!
+Traceback (most recent call last):
+  File "/root/miniconda3/envs/qwen_kline/lib/python3.11/site-packages/huggingface_hub/file_download.py", line 399, in http_get
+    import hf_transfer  # type: ignore[no-redef]
+    ^^^^^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'hf_transfer'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/workspace/QWEN2VL_KLINE/src/train_qwen2vl.py", line 283, in <module>
+    main()
+  File "/workspace/QWEN2VL_KLINE/src/train_qwen2vl.py", line 237, in main
+    model, processor = load_model_and_processor()
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/QWEN2VL_KLINE/src/train_qwen2vl.py", line 177, in load_model_and_processor
+    model = Qwen2VLForConditionalGeneration.from_pretrained(
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/miniconda3/envs/qwen_kline/lib/python3.11/site-packages/transformers/modeling_utils.py", line 277, in _wrapper
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/root/miniconda3/envs/qwen_kline/lib/python3.11/site-packages/transformers/modeling_utils.py", line 4734, in from_pretrained
+    resolved_config_file = cached_file(
+                           ^^^^^^^^^^^^
+  File "/root/miniconda3/envs/qwen_kline/lib/python3.11/site-packages/transformers/utils/hub.py", line 322, in cached_file
+    file = cached_files(path_or_repo_id=path_or_repo_id, filenames=[filename], **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/miniconda3/envs/qwen_kline/lib/python3.11/site-packages/transformers/utils/hub.py", line 567, in cached_files
+    raise e
+  File "/root/miniconda3/envs/qwen_kline/lib/python3.11/site-packages/transformers/utils/hub.py", line 479, in cached_files
+    hf_hub_download(
+  File "/root/miniconda3/envs/qwen_kline/lib/python3.11/site-packages/huggingface_hub/utils/_validators.py", line 114, in _inner_fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/root/miniconda3/envs/qwen_kline/lib/python3.11/site-packages/huggingface_hub/file_download.py", line 1007, in hf_hub_download
+    return _hf_hub_download_to_cache_dir(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/miniconda3/envs/qwen_kline/lib/python3.11/site-packages/huggingface_hub/file_download.py", line 1168, in _hf_hub_download_to_cache_dir
+    _download_to_tmp_and_move(
+  File "/root/miniconda3/envs/qwen_kline/lib/python3.11/site-packages/huggingface_hub/file_download.py", line 1735, in _download_to_tmp_and_move
+    http_get(
+  File "/root/miniconda3/envs/qwen_kline/lib/python3.11/site-packages/huggingface_hub/file_download.py", line 401, in http_get
+    raise ValueError(
+ValueError: Fast download using 'hf_transfer' is enabled (HF_HUB_ENABLE_HF_TRANSFER=1) but 'hf_transfer' package is not available in your environment. Try `pip install hf_transfer`.
