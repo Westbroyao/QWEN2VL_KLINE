@@ -40,12 +40,16 @@ DEVICE_MAP = "auto"
 
 # ----------------- 自定义数据集 & 预处理 -----------------
 
-def add_file_prefix_for_images(messages):
+
+
+def add_file_prefix_for_images(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    把 user 消息中的本地图片路径补成 file:// 绝对路径，
-    并过滤掉 image 字段为 None 或不是字符串的条目。
+    - 把消息中的本地图片路径补成 file:// 绝对路径；
+    - 过滤掉 image 字段为 None 或不是字符串的图片项；
+    - 顺手把所有条目里 value 为 None 的 "image"/"text" 键删掉。
     """
     new_messages = []
+
     for msg in messages:
         contents = msg.get("content", [])
         if not isinstance(contents, list):
@@ -54,19 +58,33 @@ def add_file_prefix_for_images(messages):
 
         clean_content = []
         for item in contents:
-            if isinstance(item, dict) and item.get("type") == "image":
+            if not isinstance(item, dict):
+                clean_content.append(item)
+                continue
+
+            item_type = item.get("type")
+
+            # 1) 处理图片项
+            if item_type == "image":
                 path = item.get("image", None)
 
-                # 只保留非空字符串路径
+                # 非法图片项（image 不是非空字符串）直接丢掉
                 if not isinstance(path, str) or path.strip() == "":
-                    # 直接丢掉这条 image 项
                     continue
 
+                # 补全 file:// 前缀
                 if not path.startswith("file://"):
                     abs_path = os.path.abspath(path)
                     item = {**item, "image": "file://" + abs_path}
 
-            clean_content.append(item)
+            # 2) 统一清理 None 字段：image=None / text=None 都删掉
+            cleaned_item = {}
+            for k, v in item.items():
+                if k in ("image", "text") and v is None:
+                    continue
+                cleaned_item[k] = v
+
+            clean_content.append(cleaned_item)
 
         new_messages.append({**msg, "content": clean_content})
 
@@ -77,28 +95,18 @@ def build_training_example(
     example: Dict[str, Any],
     processor: AutoProcessor,
 ) -> Dict[str, Any]:
-    """
-    把一行 JSONL（含 messages）变成模型可以吃的张量：
-    - input_ids, attention_mask
-    - pixel_values（图像特征）
-    - labels（默认= input_ids）
-    """
     messages = example["messages"]
-
-    # 1) 补全 file:// 前缀 + 过滤非法 image
     messages = add_file_prefix_for_images(messages)
 
-    # 2) 文本：用 chat template 拼成一个字符串
     text = processor.apply_chat_template(
         messages,
         tokenize=False,
         add_generation_prompt=False,
     )
 
-    # 3) 用官方工具从 messages 里解析出视觉信息（关键）
     image_inputs, video_inputs = process_vision_info(messages)
 
-    # 4) 统一交给 AutoProcessor 处理
+    # 注意：这里不做 v[0]，保持 batch 维度=1
     model_inputs = processor(
         text=[text],
         images=image_inputs,
@@ -109,20 +117,12 @@ def build_training_example(
         return_tensors="pt",
     )
 
-    # batch_size=1，这里直接取第 0 个
-    input_ids = model_inputs["input_ids"][0]
-    attention_mask = model_inputs["attention_mask"][0]
-    pixel_values = model_inputs["pixel_values"][0]
-
-    # 简单做法：labels = input_ids
-    labels = input_ids.clone()
-
-    return {
-        "input_ids": input_ids,
-        "attention_mask": attention_mask,
-        "pixel_values": pixel_values,
-        "labels": labels,
-    }
+    # labels 跟 input_ids 同形状：[1, seq_len]
+    model_inputs["labels"] = model_inputs["input_ids"].clone()
+    
+    # 直接返回整个 dict，所有 key 都保留：
+    # input_ids, attention_mask, pixel_values, image_grid_thw, ...
+    return model_inputs
 
 
 class QwenKlineDataset(Dataset):
@@ -137,6 +137,7 @@ class QwenKlineDataset(Dataset):
 
     def __getitem__(self, idx):
         example = self.dataset[idx]
+        
         return build_training_example(example, self.processor)
 
 
@@ -146,22 +147,22 @@ class QwenKlineDataset(Dataset):
 @dataclass
 class DataCollatorForQwenVL:
     """
-    Trainer 用的数据整理函数：把 list[dict] 拼成 batch。
-    每个样本里已经是张量了，这里简单 stack 一下。
+    把若干个样本（每个样本里已经是 batch_size=1 的张量）
+    沿着第 0 维拼接成真正的 batch。
     """
 
     def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, Any]:
-        input_ids = torch.stack([f["input_ids"] for f in features])
-        attention_mask = torch.stack([f["attention_mask"] for f in features])
-        pixel_values = torch.stack([f["pixel_values"] for f in features])
-        labels = torch.stack([f["labels"] for f in features])
+        batch: Dict[str, Any] = {}
+        first = features[0]
 
-        batch = {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            "pixel_values": pixel_values,
-            "labels": labels,
-        }
+        for key, value in first.items():
+            if isinstance(value, torch.Tensor):
+                # 每个 value 是 [1, ...]，cat 后变成 [batch_size, ...]
+                batch[key] = torch.cat([f[key] for f in features], dim=0)
+            else:
+                # 非张量（一般用不到），直接收集成列表
+                batch[key] = [f[key] for f in features]
+
         return batch
 
 
