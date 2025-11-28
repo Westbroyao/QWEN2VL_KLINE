@@ -13,6 +13,7 @@ from transformers import (
     TrainingArguments,
     Trainer,
     BitsAndBytesConfig,
+    TrainerCallback
 )
 from peft import LoraConfig, get_peft_model
 from qwen_vl_utils import process_vision_info
@@ -212,6 +213,63 @@ def load_model_and_processor():
 
     return model, processor
 
+# ----------------- 训练和验证误差 -----------------
+
+
+class CSVLoggingCallback(TrainerCallback):
+    """
+    把 Trainer 的 log（train loss / eval loss 等）写入一个 CSV 文件。
+
+    - on_log 会被 Trainer 定期调用（由 logging_steps/eval_steps 控制）
+    - logs 里会包含 "loss"（训练）、"eval_loss"（验证）等字段
+    """
+
+    def __init__(self, csv_path: str):
+        self.csv_path = csv_path
+        self.initialized = False
+        self.fieldnames = None
+        self.file = None
+        self.writer = None
+
+    def _init_writer(self, logs: dict):
+        # 增加 step / epoch 两个字段
+        base_keys = ["step", "epoch"]
+        other_keys = [k for k in logs.keys() if k not in base_keys]
+        self.fieldnames = base_keys + other_keys
+
+        new_file = not os.path.exists(self.csv_path)
+        self.file = open(self.csv_path, "a", newline="")
+        self.writer = csv.DictWriter(self.file, fieldnames=self.fieldnames)
+
+        if new_file:
+            self.writer.writeheader()
+
+        self.initialized = True
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        # 每次 Trainer 打 log 时都会进这里（train/eval 都会）
+        if logs is None:
+            return
+
+        logs = dict(logs)
+        # 补充 step / epoch 信息
+        logs["step"] = state.global_step
+        logs["epoch"] = state.epoch
+
+        if not self.initialized:
+            self._init_writer(logs)
+
+        # 只保留我们定义的字段，避免字段顺序乱掉
+        row = {k: logs.get(k, None) for k in self.fieldnames}
+        self.writer.writerow(row)
+        self.file.flush()
+
+    def on_train_end(self, args, state, control, **kwargs):
+        if self.file is not None:
+            self.file.close()
+
+
+
 
 # ----------------- main -----------------
 
@@ -260,7 +318,7 @@ def main():
         logging_steps=10,
         save_steps=500,
         eval_strategy="steps",
-        eval_steps=500,
+        eval_steps=10,
         save_total_limit=2,
         bf16=True if torch.cuda.is_available() else False,
         fp16=False,
@@ -268,12 +326,15 @@ def main():
     )
 
     # 5. Trainer
+    log_csv_path = os.path.join(training_args.output_dir, "train_eval_log.csv")
+
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         data_collator=data_collator,
+        callbacks=[CSVLoggingCallback(log_csv_path)],
     )
 
     # 6. 开始训练

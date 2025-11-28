@@ -3,6 +3,7 @@ pandas
 matplotlib
 mplfinance
 requests
+csv
 
 datasets>=2.20.0
 transformers>=4.44.0
