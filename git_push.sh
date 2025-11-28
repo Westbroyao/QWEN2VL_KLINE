@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 一键 add + commit + push 脚本
+# 一键 add + commit + push 脚本（支持 nothing to commit 也继续 push）
 
 set -e
 
@@ -27,7 +27,7 @@ echo "===> 当前 git 状态："
 git status
 echo
 
-read -rp "确认要 git add . 并提交到 origin/$BRANCH 吗？[y/N] " CONFIRM
+read -rp "确认要 git add . 并推送到 origin/$BRANCH 吗？[y/N] " CONFIRM
 if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
   echo "已取消。"
   exit 0
@@ -37,8 +37,13 @@ echo
 echo "===> git add ."
 git add .
 
-echo "===> git commit -m \"$COMMIT_MSG\""
-git commit -m "$COMMIT_MSG"
+# 检查暂存区是否有改动
+if git diff --cached --quiet; then
+  echo "没有新的改动需要提交，跳过 commit，直接 push 到 origin/$BRANCH ..."
+else
+  echo "===> git commit -m \"$COMMIT_MSG\""
+  git commit -m "$COMMIT_MSG"
+fi
 
 echo "===> git push origin $BRANCH"
 git push origin "$BRANCH"
