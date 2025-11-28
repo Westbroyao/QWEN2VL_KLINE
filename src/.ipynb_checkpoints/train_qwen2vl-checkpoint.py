@@ -2,6 +2,7 @@ import os
 import argparse
 from dataclasses import dataclass
 from typing import Dict, List, Any
+import csv
 
 import torch
 from torch.utils.data import Dataset
@@ -218,49 +219,50 @@ def load_model_and_processor():
 
 class CSVLoggingCallback(TrainerCallback):
     """
-    把 Trainer 的 log（train loss / eval loss 等）写入一个 CSV 文件。
-
-    - on_log 会被 Trainer 定期调用（由 logging_steps/eval_steps 控制）
-    - logs 里会包含 "loss"（训练）、"eval_loss"（验证）等字段
+    把 Trainer 的 log 写到 CSV。
+    固定列：step, epoch, loss, eval_loss, learning_rate, grad_norm
     """
 
     def __init__(self, csv_path: str):
         self.csv_path = csv_path
-        self.initialized = False
-        self.fieldnames = None
+        self.fieldnames = [
+            "step",
+            "epoch",
+            "loss",
+            "eval_loss",
+            "learning_rate",
+            "grad_norm",
+        ]
         self.file = None
         self.writer = None
+        self.initialized = False
 
-    def _init_writer(self, logs: dict):
-        # 增加 step / epoch 两个字段
-        base_keys = ["step", "epoch"]
-        other_keys = [k for k in logs.keys() if k not in base_keys]
-        self.fieldnames = base_keys + other_keys
-
+    def _init_writer(self):
         new_file = not os.path.exists(self.csv_path)
         self.file = open(self.csv_path, "a", newline="")
         self.writer = csv.DictWriter(self.file, fieldnames=self.fieldnames)
-
         if new_file:
             self.writer.writeheader()
-
         self.initialized = True
 
     def on_log(self, args, state, control, logs=None, **kwargs):
-        # 每次 Trainer 打 log 时都会进这里（train/eval 都会）
         if logs is None:
             return
 
-        logs = dict(logs)
-        # 补充 step / epoch 信息
-        logs["step"] = state.global_step
-        logs["epoch"] = state.epoch
-
         if not self.initialized:
-            self._init_writer(logs)
+            self._init_writer()
 
-        # 只保留我们定义的字段，避免字段顺序乱掉
-        row = {k: logs.get(k, None) for k in self.fieldnames}
+        logs = dict(logs)
+
+        row = {k: None for k in self.fieldnames}
+        row["step"] = state.global_step
+        row["epoch"] = state.epoch
+
+        # 这些 key 如果在 logs 里，就填进去
+        for k in ["loss", "eval_loss", "learning_rate", "grad_norm"]:
+            if k in logs:
+                row[k] = logs[k]
+
         self.writer.writerow(row)
         self.file.flush()
 
