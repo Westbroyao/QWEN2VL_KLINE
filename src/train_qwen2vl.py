@@ -3,9 +3,11 @@ import argparse
 from dataclasses import dataclass
 from typing import Dict, List, Any
 import csv
+import numpy as np
+import json
 
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 
 from datasets import load_dataset
 from transformers import (
@@ -16,6 +18,7 @@ from transformers import (
     BitsAndBytesConfig,
     TrainerCallback
 )
+
 from peft import LoraConfig, get_peft_model
 from qwen_vl_utils import process_vision_info
 
@@ -32,7 +35,7 @@ OUTPUT_DIR = "experiments/dataqwen2vl_kline_lora"
 MAX_LENGTH = 1024          # 文本最大长度，太大会占显存
 BATCH_SIZE = 1             # per-device batch size
 GRAD_ACCUM = 4             # 累积梯度，相当于总 batch = BATCH_SIZE * GRAD_ACCUM
-NUM_EPOCHS = 3
+NUM_EPOCHS = 2
 LR = 1e-4
 WARMUP_RATIO = 0.03
 
@@ -100,17 +103,28 @@ def build_training_example(
     messages = example["messages"]
     messages = add_file_prefix_for_images(messages)
 
-    text = processor.apply_chat_template(
+    # 1) full_text: 带有真实 assistant 回答的完整对话文本
+    full_text = processor.apply_chat_template(
         messages,
         tokenize=False,
         add_generation_prompt=False,
     )
 
+    # 2) prompt_text: 只有 system + user，去掉最后 assistant 的“提问部分”
+    #    再加一个 generation prompt，让模型在这里开始生成回答
+    prompt_messages = messages[:-1]  # 假设最后一条就是 assistant 的答案
+    prompt_text = processor.apply_chat_template(
+        prompt_messages,
+        tokenize=False,
+        add_generation_prompt=True,  # 模型从这里开始续写
+    )
+
+    # 3) 视觉信息
     image_inputs, video_inputs = process_vision_info(messages)
 
-    # 注意：这里不做 v[0]，保持 batch 维度=1
+    # 4) 用完整对话文本 full_text 做 encoder，使模型能看到“带答案的目标序列”
     model_inputs = processor(
-        text=[text],
+        text=[full_text],
         images=image_inputs,
         videos=video_inputs,
         padding="max_length",
@@ -118,12 +132,34 @@ def build_training_example(
         truncation=True,
         return_tensors="pt",
     )
+    # model_inputs: {"input_ids": [1, L], "attention_mask": [1, L], "pixel_values": ...}
 
-    # labels 跟 input_ids 同形状：[1, seq_len]
-    model_inputs["labels"] = model_inputs["input_ids"].clone()
-    
-    # 直接返回整个 dict，所有 key 都保留：
-    # input_ids, attention_mask, pixel_values, image_grid_thw, ...
+    input_ids = model_inputs["input_ids"]          # (1, L)
+    labels = input_ids.clone()                    # 先复制一份
+
+    tokenizer = processor.tokenizer
+    pad_token_id = tokenizer.pad_token_id
+
+    # 5) 先把 padding 全部 mask 掉
+    labels[input_ids == pad_token_id] = -100
+
+    # 6) 计算 prompt_text 的长度（多少个 token）
+    prompt_ids = tokenizer(
+        prompt_text,
+        add_special_tokens=False,
+    )["input_ids"]
+    prompt_len = len(prompt_ids)
+
+    # 避免被截断导致越界
+    seq_len = labels.shape[1]
+    prompt_len = min(prompt_len, seq_len)
+
+    # 7) 把 prompt 部分的 label 也设成 -100，只在回答上算 loss
+    labels[:, :prompt_len] = -100
+
+    model_inputs["labels"] = labels
+
+    # 保持 batch 维度在外面： (1, L), (1, n_img, C, H, W) ...
     return model_inputs
 
 
@@ -271,6 +307,117 @@ class CSVLoggingCallback(TrainerCallback):
             self.file.close()
 
 
+# ----------------- 保存验证集输出结果留待评测 -----------------
+
+
+def save_eval_predictions_streaming(
+    model,
+    processor,
+    raw_dataset,         # ⚠️ 这里是“带 messages 的原始 HF dataset”，而不是 QwenKlineDataset
+    output_path: str,
+    max_new_tokens: int = 64,
+    eval_num: int = 20
+):
+    """
+    对 raw_dataset 逐条样本做推理，仅用 prompt（system+user）作为输入，
+    不把真实的 assistant 回答喂给 generate。
+
+    - raw_dataset[i] 需要包含字段: "messages"
+    - messages 的最后一条假定为带 JSON 答案的 assistant，用于 label
+    - 生成结果和 label 写入 jsonl
+    """
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    device = next(model.parameters()).device
+    tokenizer = processor.tokenizer
+    model.eval()
+
+    print(f"Saving eval predictions (prompt-only) to {output_path} ...")
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        for idx in range(min(len(raw_dataset), eval_num)):
+            example: Dict[str, Any] = raw_dataset[idx]
+            messages = example["messages"]
+
+            # 1. 构造 "只包含 system + user" 的 prompt messages
+            #    messages = [system, user, assistant]，最后一个是标注答案
+            if len(messages) < 2:
+                # 防御式写法：没法构成正常对话就跳过
+                continue
+
+            # prompt 部分：不包含最后一条 assistant（真实答案）
+            prompt_messages = messages[:-1]
+
+            # 补全 image 的 file:// 前缀
+            prompt_messages = add_file_prefix_for_images(prompt_messages)
+
+            # 2. 线性化成文本 + 视觉信息
+            prompt_text = processor.apply_chat_template(
+                prompt_messages,
+                tokenize=False,
+                add_generation_prompt=True,  # 在 assistant 起始处让模型开始生成
+            )
+
+            image_inputs, video_inputs = process_vision_info(prompt_messages)
+
+            # 3. 用 processor 把 prompt-only 转成张量
+            proc_inputs = processor(
+                text=[prompt_text],
+                images=image_inputs,
+                videos=video_inputs,
+                return_tensors="pt",
+            )
+
+            # 把张量搬到 GPU
+            proc_inputs = {
+                k: (v.to(device) if isinstance(v, torch.Tensor) else v)
+                for k, v in proc_inputs.items()
+            }
+
+            # 4. 只用 prompt 调 generate
+            with torch.no_grad():
+                gen_ids = model.generate(
+                    **proc_inputs,
+                    max_new_tokens=max_new_tokens,
+                )
+
+            # 只保留“新生成”的部分：把前面的 prompt token 截掉
+            prompt_len = proc_inputs["input_ids"].shape[1]  # prompt 的长度
+            gen_ids = gen_ids[0]                            # (total_len,)
+            answer_ids = gen_ids[prompt_len:]               # 只要新增 token
+
+            pred_text = tokenizer.decode(
+                answer_ids.cpu(), skip_special_tokens=True
+            )
+
+
+            # 5. 取“真实答案”：messages 最后一条 assistant 的 text
+            gt_text_parts = []
+            last_msg = messages[-1]
+            for item in last_msg.get("content", []):
+                if isinstance(item, dict) and item.get("type") == "text":
+                    t = item.get("text", "")
+                    if t:
+                        gt_text_parts.append(t)
+            gt_text = "\n".join(gt_text_parts)
+
+            # 6. 写入 jsonl
+            rec = {
+                "id": idx,
+                "prediction": pred_text,
+                "label": gt_text,
+            }
+            json.dump(rec, f, ensure_ascii=False)
+            f.write("\n")
+
+            # 清理当前样本的显存
+            del gen_ids
+            torch.cuda.empty_cache()
+
+            if (idx + 1) % 10 == 0:
+                print(f"  processed {idx + 1} / {min(len(raw_dataset), eval_num)} samples ...")
+
+    print("Done.")
 
 
 # ----------------- main -----------------
@@ -317,10 +464,10 @@ def main():
         num_train_epochs=args.num_epochs,
         learning_rate=args.learning_rate,
         warmup_ratio=args.warmup_ratio,
-        logging_steps=10,
+        logging_steps=100,
         save_steps=500,
         eval_strategy="steps",
-        eval_steps=10,
+        eval_steps=500,
         save_total_limit=2,
         bf16=True if torch.cuda.is_available() else False,
         fp16=False,
@@ -339,10 +486,28 @@ def main():
         callbacks=[CSVLoggingCallback(log_csv_path)],
     )
 
-    # 6. 开始训练
-    trainer.train()
 
-    # 7. 保存 LoRA 权重和 processor
+    # 6. 开始训练
+    trainer.train(resume_from_checkpoint=True)
+    
+    torch.cuda.empty_cache() # 训练完清缓存
+
+    
+    # 7. 训练结束后，在验证集上生成，并把结果写到 jsonl
+
+    save_path = os.path.join(args.output_dir, "eval_predictions.jsonl")
+    eval_num = 50  # 后续可以选择预测大小
+    
+    save_eval_predictions_streaming(
+        model=model,
+        processor=processor,
+        raw_dataset=raw_datasets["validation"],  # 注意拿的是 .dataset (Dataset的raw_dataset)
+        output_path=save_path,
+        max_new_tokens=64,
+        eval_num=eval_num         
+    )
+
+    # 8. 保存 LoRA 权重和 processor
     trainer.save_model(args.output_dir)
     processor.save_pretrained(args.output_dir)
     print("训练完成，模型已保存到", args.output_dir)
