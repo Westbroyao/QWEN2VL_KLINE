@@ -163,12 +163,12 @@ def build_single_sample(idx: int,
     user_text = (
         "下面的图片是BTCUSDT过去30个交易日的日K线图。\n"
         "请根据图形判断未来5日的总体价格方向，并给出简短理由，"
-        "最终以JSON形式返回（只包含label和reason两个字段）。"
+        "最终以JSON形式返回（只包含reason和label两个字段）。"
     )
 
     reason = generate_reason(label, x_window)
     assistant_json = json.dumps(
-        {"label": label, "reason": reason},
+        {"reason": reason, "label": label},
         ensure_ascii=False
     )
 
