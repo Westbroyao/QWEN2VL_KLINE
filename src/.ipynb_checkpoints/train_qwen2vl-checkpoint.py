@@ -315,7 +315,7 @@ def save_eval_predictions_streaming(
     processor,
     raw_dataset,         # ⚠️ 这里是“带 messages 的原始 HF dataset”，而不是 QwenKlineDataset
     output_path: str,
-    max_new_tokens: int = 64,
+    max_new_tokens: int = 128,
     eval_num: int = 20
 ):
     """
