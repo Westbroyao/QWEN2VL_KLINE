@@ -488,7 +488,9 @@ def main():
 
 
     # 6. 开始训练
-    trainer.train(resume_from_checkpoint=True)
+
+    trainer.train()
+    # trainer.train(resume_from_checkpoint=True)   # 断点重连
     
     torch.cuda.empty_cache() # 训练完清缓存
 
