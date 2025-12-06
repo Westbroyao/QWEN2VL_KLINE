@@ -592,8 +592,13 @@ def main():
 
     # 6. 开始训练
 
-    # trainer.train()
-    trainer.train(resume_from_checkpoint=True)   # 断点重连
+    # 先尝试从最近的 checkpoint 断点续训，如果失败（比如没有 checkpoint），就从头开始
+    try:
+        print("尝试从最近的 checkpoint 断点重连训练……")
+        trainer.train(resume_from_checkpoint=True)
+    except Exception as e:
+        print(f"断点重连失败（{e}），改为从头开始训练。")
+        trainer.train()
     
     torch.cuda.empty_cache() # 训练完清缓存
 
