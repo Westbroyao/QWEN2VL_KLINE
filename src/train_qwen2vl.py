@@ -372,7 +372,6 @@ class EvalCollator:
 
             batch_prompt_texts.append(prompt_text)
             batch_image_inputs.append(image_inputs)   # 每个样本自己的 image 列表
-            batch_video_inputs.append(video_inputs)
             ids.append(idx)
 
             # 取最后一条 assistant 的文本作为 ground-truth
@@ -399,7 +398,6 @@ class EvalCollator:
         proc_inputs = self.processor(
             text=batch_prompt_texts,
             images=batch_image_inputs,
-            videos=batch_video_inputs,
             return_tensors="pt",
             padding=True,  # 按 batch 最长样本做 padding
         )
@@ -590,8 +588,8 @@ def main():
 
     # 6. 开始训练
 
-    trainer.train()
-    # trainer.train(resume_from_checkpoint=True)   # 断点重连
+    # trainer.train()
+    trainer.train(resume_from_checkpoint=True)   # 断点重连
     
     torch.cuda.empty_cache() # 训练完清缓存
 
@@ -600,7 +598,7 @@ def main():
 
 
     save_path = os.path.join(args.output_dir, "eval_predictions.jsonl")
-    eval_num = 50  # 后续可以选择预测大小
+    eval_num = 1000  # 后续可以选择预测大小
     
     save_eval_predictions_streaming(
         model=model,

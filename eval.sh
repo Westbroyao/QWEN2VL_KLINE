@@ -17,4 +17,4 @@ echo
 # 运行 eval.py
 $PYTHON "$ROOT_DIR/src/eval.py" "$EVAL_FILE" --show-examples 10 2>&1 | tee results/eval.log
 
-cp experiments/qwen2vl_kline_lora/train_eval_log.csv result/train_eval_log.csv
+cp experiments/qwen2vl_kline_lora/train_eval_log.csv results/train_eval_log.csv
