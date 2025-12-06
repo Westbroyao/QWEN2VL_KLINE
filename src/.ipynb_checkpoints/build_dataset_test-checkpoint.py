@@ -5,14 +5,14 @@ from typing import List, Dict, Any
 
 # ======== 配置区域，根据你自己的路径改一下 ========
 
-NPZ_PATH = "data_proc/windows_30_5_multi_with_labels.npz"   # 含 X / y / labels 的 npz
-IMAGE_DIR = "data_images/kline_windows"                   # 存放K线图的文件夹
-OUT_TRAIN_JSONL = "data_train/train.jsonl"
+NPZ_PATH = "data_proc/windows_30_5_multi_with_labels_test_resampling.npz"   # 含 X / y / labels 的 npz
+IMAGE_DIR = "data_test/images"                     # 存放K线图的文件夹
+OUT_TRAIN_JSONL = "data_test/test.jsonl"
 OUT_VAL_JSONL = "data_train/val.jsonl"
 
-TRAIN_RATIO = 0.9       # 训练/验证划分比例
+TRAIN_RATIO = 1       # 训练/验证划分比例
 RANDOM_SEED = 42        # 保证可复现
-DATA_NUMBER = None      # 最多使用多少条样本（None 表示用全部）
+DATA_NUMBER = 100000       # 先拿小样本测试
 
 # 生成的图片文件名格式（和你画图脚本保持一致）
 # 之前画图脚本里是：window_{i:05d}{label_part}.png，其中 label_part 形如 "_up"
@@ -56,6 +56,7 @@ def generate_reason(label: str, x_window: np.ndarray) -> str:
 
     # 防止奇怪数据
     if n < 2 or np.any(close <= 0):
+        # 回退到简单模板
         if label == "up":
             return "近期价格整体偏强，因此判断未来5个交易日上涨的概率较大。"
         elif label == "down":
@@ -72,7 +73,7 @@ def generate_reason(label: str, x_window: np.ndarray) -> str:
 
     # 简单日收益率 & 波动率
     daily_ret = np.diff(close) / close[:-1]
-    vol_30 = float(np.std(daily_ret))
+    vol_30 = float(np.std(daily_ret))  # 不年化，只做相对比较
 
     # 成交量变化：最近5天 vs 之前20天
     if n > 10:
@@ -82,6 +83,7 @@ def generate_reason(label: str, x_window: np.ndarray) -> str:
     else:
         vol_ratio = 1.0
 
+    # 文案片段
     # 趋势描述
     if ret_30 > 0.15:
         trend_text = "过去30个交易日整体呈现明显的上涨趋势"
@@ -106,7 +108,7 @@ def generate_reason(label: str, x_window: np.ndarray) -> str:
     else:
         recent_text = "最近一周价格变化不大"
 
-    # 波动率描述
+    # 波动率描述（BTC 波动本身就大，这里阈值略宽松）
     if vol_30 > 0.06:
         vol_text = "整体波动幅度较大"
     elif vol_30 > 0.03:
@@ -138,12 +140,14 @@ def build_single_sample(idx: int,
                         label: str,
                         image_dir: str,
                         x_window: np.ndarray) -> Dict[str, Any]:
+    ...
     img_name = IMG_NAME_TEMPLATE.format(idx=idx, label=label)
     img_path = os.path.join(image_dir, img_name)
 
     if not os.path.exists(img_path):
         raise FileNotFoundError(f"找不到图片文件: {img_path}")
 
+    
     # system prompt：说明任务
     system_prompt = (
         "你是一名量化分析师，擅长分析加密货币K线图。\n"
@@ -172,6 +176,7 @@ def build_single_sample(idx: int,
         "messages": [
             {
                 "role": "system",
+                # 🔧 改成 list[{"type":"text"}]
                 "content": [
                     {"type": "text", "text": system_prompt}
                 ]
@@ -185,6 +190,7 @@ def build_single_sample(idx: int,
             },
             {
                 "role": "assistant",
+                # 🔧 也改成 list[{"type":"text"}]
                 "content": [
                     {"type": "text", "text": assistant_json}
                 ]
@@ -199,83 +205,25 @@ def build_dataset(npz_path: str,
                   train_ratio: float = 0.8,
                   seed: int = 42,
                   data_number: int = None):
-    """
-    从npz和图片目录构造train/val两个列表。
-    - 先从全部样本中随机抽取 data_number 个（如果指定了的话）
-    - 再按 label 拆分成 up/flat/down
-    - 每个 label 内部分割 train/val
-    - 然后对训练集做下采样重采样，使得三类数量一致（平衡训练集）
-    """
+    """从npz和图片目录构造train/val两个列表。"""
     X, y, time_index, labels_str = load_npz(npz_path)
-    n_all = len(labels_str)
+    n_samples = min(len(labels_str), data_number)
+    indices = np.arange(n_samples)
 
     rng = np.random.default_rng(seed)
+    rng.shuffle(indices)
 
-    # 先选一个整体子集（可选）
-    all_indices = np.arange(n_all)
-    if data_number is not None and data_number < n_all:
-        rng.shuffle(all_indices)
-        all_indices = all_indices[:data_number]
+    n_train = int(n_samples * train_ratio)
+    train_idx = indices[:n_train]
+    val_idx = indices[n_train:]
 
-    # 按 label 分桶
-    buckets = {"up": [], "flat": [], "down": []}
-    for idx in all_indices:
-        lbl = str(labels_str[idx])
-        if lbl not in buckets:
-            # 遇到非法标签就跳过
-            continue
-        buckets[lbl].append(int(idx))
-
-    print("原始样本数量（子集内）：")
-    for k, v in buckets.items():
-        print(f"  {k}: {len(v)}")
-
-    # 在每个 label 内部划分 train / val
-    train_idx_by_label = {"up": [], "flat": [], "down": []}
-    val_idx_all: List[int] = []
-
-    for lbl, idx_list in buckets.items():
-        if not idx_list:
-            continue
-        idx_arr = np.array(idx_list)
-        rng.shuffle(idx_arr)
-        n_lbl = len(idx_arr)
-        n_train_lbl = int(n_lbl * train_ratio)
-        train_idx_by_label[lbl] = idx_arr[:n_train_lbl].tolist()
-        val_idx_all.extend(idx_arr[n_train_lbl:].tolist())
-
-    # 对训练集做“下采样重采样”：每一类取相同数量 = 最少那一类的数量
-    train_counts = {lbl: len(idx_list) for lbl, idx_list in train_idx_by_label.items()}
-    print("划分后各类训练样本数量：", train_counts)
-
-    non_empty_counts = [c for c in train_counts.values() if c > 0]
-    if not non_empty_counts:
-        raise ValueError("没有任何训练样本，请检查标签或 data_number 设置。")
-
-    min_train = min(non_empty_counts)
-    print(f"将对训练集做下采样重采样，每类保留 {min_train} 条样本。")
-
-    balanced_train_idx: List[int] = []
-    for lbl, idx_list in train_idx_by_label.items():
-        if len(idx_list) == 0:
-            continue
-        idx_arr = np.array(idx_list)
-        rng.shuffle(idx_arr)
-        balanced_train_idx.extend(idx_arr[:min_train].tolist())
-
-    rng.shuffle(balanced_train_idx)
-    rng.shuffle(val_idx_all)
-
-    print(f"平衡后的训练样本总数: {len(balanced_train_idx)}")
-    print(f"验证集样本总数: {len(val_idx_all)}")
-
-    # === 构造真正的样本 ===
     train_samples: List[Dict[str, Any]] = []
     val_samples: List[Dict[str, Any]] = []
 
-    for idx in balanced_train_idx:
+    # 构造训练集
+    for idx in train_idx:
         label = str(labels_str[idx])
-        x_window = X[idx]
+        x_window = X[idx]            # (30, 5)
         sample = build_single_sample(
             idx=int(idx),
             label=label,
@@ -284,7 +232,8 @@ def build_dataset(npz_path: str,
         )
         train_samples.append(sample)
 
-    for idx in val_idx_all:
+    # 构造验证集
+    for idx in val_idx:
         label = str(labels_str[idx])
         x_window = X[idx]
         sample = build_single_sample(
@@ -317,7 +266,7 @@ def main():
     )
 
     save_jsonl(train_samples, OUT_TRAIN_JSONL)
-    save_jsonl(val_samples, OUT_VAL_JSONL)
+    # save_jsonl(val_samples, OUT_VAL_JSONL)
 
 
 if __name__ == "__main__":

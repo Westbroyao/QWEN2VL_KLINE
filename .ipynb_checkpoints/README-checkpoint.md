@@ -6,12 +6,10 @@
 3. python src/prepare_data_1_reward_tag.py
 4. python src/prepare_data_2_resampling.py
 5. 画K线图：python src/make_plots.py
-6. 实验设计：修改 src/build_dataset.py 并运行 python src/build_dataset.py
-7. 微调模型：bash run_train.sh  # 可以选择根据实验目的修改训练参数
-8. 查看结果：bash eval.sh
-9. 配置git：bash git_config.sh
-10. 上传仓库：bash git_push.sh   # 根据需要设置分支
-
-
-
-
+6. 画测试集K线图：mkdir -p data_test/images ｜ python src/make_plots_test.py
+7. 建立train_val数据集：python src/build_dataset.py
+9. 建立test数据集：python src/build_dataset_test.py
+10. 微调模型：bash run_train.sh  # 可以选择根据实验目的修改训练参数
+11. 查看结果：bash eval.sh
+12. 配置git：bash git_config.sh
+13. 上传仓库：bash git_push.sh   # 根据需要设置分支

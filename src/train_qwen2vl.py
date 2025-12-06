@@ -29,6 +29,7 @@ MODEL_NAME = "Qwen/Qwen2-VL-7B-Instruct"
 
 TRAIN_JSONL = "data_train/train.jsonl"
 VAL_JSONL = "data_train/val.jsonl"
+TEST_JSONL = "data_test/test.jsonl"
 
 OUTPUT_DIR = "experiments/dataqwen2vl_kline_lora"
 
@@ -524,6 +525,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--train_file", type=str, default=TRAIN_JSONL)
     parser.add_argument("--val_file", type=str, default=VAL_JSONL)
+    parser.add_argument("--test_file", type=str, default=TEST_JSONL)
     parser.add_argument("--output_dir", type=str, default=OUTPUT_DIR)
     parser.add_argument("--num_epochs", type=int, default=NUM_EPOCHS)
     parser.add_argument("--batch_size", type=int, default=BATCH_SIZE)
@@ -540,6 +542,7 @@ def main():
     data_files = {
         "train": args.train_file,
         "validation": args.val_file,
+        "test": args.test_file
     }
     raw_datasets = load_dataset("json", data_files=data_files)
 
@@ -549,6 +552,7 @@ def main():
     # 3. 包装成自定义 Dataset
     train_dataset = QwenKlineDataset(raw_datasets["train"], processor)
     eval_dataset = QwenKlineDataset(raw_datasets["validation"], processor)
+    test_dataset = QwenKlineDataset(raw_datasets["test"], processor)
 
     data_collator = DataCollatorForQwenVL()
 
@@ -603,7 +607,7 @@ def main():
     save_eval_predictions_streaming(
         model=model,
         processor=processor,
-        raw_dataset=raw_datasets["validation"],  # 注意拿的是 .dataset (Dataset的raw_dataset)
+        raw_dataset=raw_datasets["test"],  # 注意拿的是 .dataset (Dataset的raw_dataset)
         output_path=save_path,
         max_new_tokens=64,
         eval_num=eval_num         

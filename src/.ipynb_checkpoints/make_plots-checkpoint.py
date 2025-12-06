@@ -54,14 +54,21 @@ def plot_one_window(args: Tuple[int, np.ndarray, any, Optional[str], str]):
     label_part = f"_{label_str}" if label_str is not None else ""
     fname = f"window_{idx:05d}{label_part}.png"
     out_path = os.path.join(out_dir, fname)
-
+    # market_colors
+    mc = mpf.make_marketcolors(
+        up='r',    # 上涨：红
+        down='g',  # 下跌：绿
+        inherit=True
+    )
+    # 设置 style
+    s = mpf.make_mpf_style(marketcolors=mc)
     # 画 K 线图并保存
     # returnfig=True 方便我们显式关闭 figure，避免内存泄漏
-    fig, _ = mpf.plot(
+    fig, axes = mpf.plot(
         df_win,
         type="candle",
         volume=True,
-        style="yahoo",
+        style=s,
         ylabel="Price",
         ylabel_lower="Volume",
         figsize=FIGSIZE,
@@ -69,8 +76,11 @@ def plot_one_window(args: Tuple[int, np.ndarray, any, Optional[str], str]):
         figscale=1.0,
         tight_layout=True,
         returnfig=True,
-        savefig=dict(fname=out_path, dpi=120, bbox_inches="tight"),
     )
+    for ax in axes:          # axes 是 [price_ax, volume_ax]
+        ax.set_xticklabels([])
+        ax.set_xlabel("")
+    fig.savefig(fname=out_path, dpi=120, bbox_inches="tight")
 
     # 显式关闭 figure，防止每个进程里堆太多图像对象
     import matplotlib.pyplot as plt
