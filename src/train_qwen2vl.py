@@ -31,6 +31,7 @@ TRAIN_JSONL = "data_train/train.jsonl"
 VAL_JSONL = "data_train/val.jsonl"
 TEST_JSONL = "data_test/test.jsonl"
 
+MODEL_DIR = "/autodl-tmp/models/qwen/Qwen2-VL-7B-Instruct"
 OUTPUT_DIR = "experiments/dataqwen2vl_kline_lora"
 
 MAX_LENGTH = 1024          # 文本最大长度，太大会占显存
@@ -219,14 +220,25 @@ def load_model_and_processor():
             bnb_4bit_compute_dtype=torch.bfloat16,
         )
 
-    model = Qwen2VLForConditionalGeneration.from_pretrained(
-        MODEL_NAME,
-        torch_dtype="auto",
-        device_map=DEVICE_MAP,
-        quantization_config=quant_config,
-    )
+    # model = Qwen2VLForConditionalGeneration.from_pretrained(
+    #     MODEL_NAME,
+    #     torch_dtype="auto",
+    #     device_map=DEVICE_MAP,
+    #     quantization_config=quant_config,
+    # )
 
-    processor = AutoProcessor.from_pretrained(MODEL_NAME)
+    # processor = AutoProcessor.from_pretrained(MODEL_NAME)
+    
+    model = Qwen2VLForConditionalGeneration.from_pretrained(
+        MODEL_DIR,
+        torch_dtype="auto",
+        device_map="auto"
+    )
+    processor = AutoProcessor.from_pretrained(MODEL_DIR)
+
+
+    
+
 
     # LoRA 配置：只训练部分线性层参数
     lora_config = LoraConfig(

@@ -4,8 +4,8 @@ import pandas as pd
 import numpy as np
 
 # 配置参数：输入窗口长度 & 输出窗口长度
-INPUT_WINDOW = 30   # 过去30天
-OUTPUT_WINDOW = 5   # 未来5天
+INPUT_WINDOW = 90   # 过去30天
+OUTPUT_WINDOW = 10   # 未来5天
 
 # 多文件模式下：原始 CSV 所在目录 & 输出 npz 路径
 CSV_DIR = "data_raw"                     # 里面放很多 .csv
@@ -81,7 +81,7 @@ def load_btcusdt_csv(csv_path: str) -> pd.DataFrame:
 def build_windows_for_df(df: pd.DataFrame,
                          input_window: int = INPUT_WINDOW,
                          output_window: int = OUTPUT_WINDOW,
-                         slide_step: int = 15):
+                         slide_step: int = 5):
     """
     对【单个】时间序列 DataFrame 构造滑动窗口，设置每15天滑动一次。
 

@@ -150,25 +150,24 @@ def build_single_sample(idx: int,
     
     # system prompt：说明任务
     system_prompt = (
-        "你是一名量化分析师，擅长分析加密货币K线图。\n"
-        "现在给你的是BTCUSDT过去30个交易日的日K线图。\n"
-        "你的任务是判断接下来5个交易日的总体价格走势："
+        "你是一名量化分析师，擅长分析中国A股K线图。\n"
+        "现在给你的是中国A股过去90个交易日的日K线图。\n"
+        "你的任务是判断接下来15个交易日的总体价格走势："
         "相比当前价格是上涨(up)、下跌(down)，还是大致震荡(flat)，"
         "并给出简要理由。\n"
-        "请只输出一个JSON，字段包括\"label\"和\"reason\"。"
+        "请只输出一个JSON，字段仅包括\"label\"。"
         "其中 label ∈ {\"up\",\"flat\",\"down\"}，"
-        "reason 用中文简短说明判断依据。"
     )
 
     user_text = (
-        "下面的图片是BTCUSDT过去30个交易日的日K线图。\n"
-        "请根据图形判断未来5日的总体价格方向，并给出简短理由，"
-        "最终以JSON形式返回（只包含reason和label两个字段）。"
+        "下面的图片是中国A股过去90个交易日的日K线图。\n"
+        "请根据图形判断未来15日的总体价格方向"
+        "最终以JSON形式返回（只包含label一个字段）。"
     )
 
     reason = generate_reason(label, x_window)
     assistant_json = json.dumps(
-        {"label": label, "reason": reason},
+        {"label": label},
         ensure_ascii=False
     )
 
