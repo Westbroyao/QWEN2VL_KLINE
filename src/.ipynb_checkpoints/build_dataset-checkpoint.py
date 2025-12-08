@@ -12,7 +12,7 @@ OUT_VAL_JSONL = "data_train/val.jsonl"
 
 TRAIN_RATIO = 0.9       # 训练/验证划分比例
 RANDOM_SEED = 42        # 保证可复现
-DATA_NUMBER = 100000       # 先拿小样本测试
+DATA_NUMBER = 300000       # 先拿小样本测试
 
 # 生成的图片文件名格式（和你画图脚本保持一致）
 # 之前画图脚本里是：window_{i:05d}{label_part}.png，其中 label_part 形如 "_up"

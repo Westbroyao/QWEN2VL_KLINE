@@ -26,3 +26,4 @@ ls   # 看看文件是不是都在了
 13. 查看结果：bash eval.sh
 14. 配置git：bash git_config.sh
 15. 上传仓库：bash git_push.sh   # 根据需要设置分支
+16. 下一轮实验：cd data_images; rm -r kline_windows; mkdir kline_windows; cd kline_windows; vi .gitignore;cd .. cd data_test; rm -r images

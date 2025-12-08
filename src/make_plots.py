@@ -11,7 +11,7 @@ matplotlib.use("Agg")
 
 NPZ_PATH = "data_proc/windows_30_5_multi_with_labels_train_val_resampling.npz"  # 或 btc_windows_30_5.npz
 OUT_DIR = "data_images/kline_windows"
-MAX_PLOTS = 100000   # 最多生成多少张图
+MAX_PLOTS = 300000   # 最多生成多少张图
 FIGSIZE = (4, 3)   # 图像大小（英寸）
 
 # 并行进程数：默认用 CPU 数的一半，你也可以手动改，比如 4

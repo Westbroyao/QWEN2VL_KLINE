@@ -13,21 +13,72 @@ def load_npz_data(npz_path: str):
     return X, y, time_index
 
 
-def balance_classes(X, y, t):
+import numpy as np
+import random
+
+def balance_classes(X, y, t, sample_counts=None):
     """
-    对 (X, y, t) 做下采样，使每个标签样本数相等，
+    对 (X, y, t) 做下采样，使每个标签样本数达到指定数量，
     并保持三者一一对应。
+
+    参数
+    ----
+    X : np.ndarray
+        特征，shape = (N, ...)
+    y : np.ndarray
+        标签，shape = (N,)
+    t : np.ndarray
+        时间戳或其它附加信息，shape = (N,)
+    sample_counts : array-like or None
+        - 如果为 None：行为与原来相同，取各类中最少的样本数。
+        - 如果为长度为 num_classes 的数组：
+          按照 np.unique(y) 的顺序依次指定每个标签要采样的数量。
+
+    返回
+    ----
+    X_res, y_res, t_res : 下采样后的 X, y, t
     """
+
+    y = np.asarray(y)
+    t = np.asarray(t)
+
     unique_labels = np.unique(y)
     label_indices = {label: np.where(y == label)[0] for label in unique_labels}
 
-    min_samples = min(len(idx) for idx in label_indices.values())
-    print(f"最少标签样本数: {min_samples}")
+    # 决定每个标签目标采样量
+    if sample_counts is None:
+        # 原逻辑：用最少的那一类做下采样
+        min_samples = min(len(idx) for idx in label_indices.values())
+        print(f"未指定 sample_counts，使用最少标签样本数: {min_samples}")
+        target_counts = {label: min_samples for label in unique_labels}
+    else:
+        sample_counts = np.asarray(sample_counts, dtype=int)
+        if sample_counts.shape[0] != len(unique_labels):
+            raise ValueError(
+                f"sample_counts 长度为 {sample_counts.shape[0]}，"
+                f"但当前共有 {len(unique_labels)} 个标签: {unique_labels}"
+            )
+        target_counts = {
+            label: int(n)
+            for label, n in zip(unique_labels, sample_counts)
+        }
+        print("标签顺序及目标采样量：")
+        for label in unique_labels:
+            print(f"  label={label}, target={target_counts[label]}, available={len(label_indices[label])}")
 
     X_res, y_res, t_res = [], [], []
 
     for label, indices in label_indices.items():
-        sampled_indices = random.sample(list(indices), min_samples)
+        n_target = target_counts[label]
+        n_avail = len(indices)
+
+        if n_target > n_avail:
+            raise ValueError(
+                f"标签 {label} 只有 {n_avail} 个样本，但你要求采样 {n_target} 个；"
+                f"如需过采样请改成有放回采样（random.choices 或 np.random.choice(replace=True))."
+            )
+
+        sampled_indices = random.sample(list(indices), n_target)
         X_res.append(X[sampled_indices])
         y_res.append(y[sampled_indices])
         t_res.append(t[sampled_indices])
@@ -43,6 +94,7 @@ def balance_classes(X, y, t):
     t_res = t_res[perm]
 
     return X_res, y_res, t_res
+
 
 
 def split_data(
@@ -112,7 +164,7 @@ def main():
     X_trv, y_trv, t_trv, X_test, y_test, t_test = split_data(X, y, t)
 
     # 2. 只对 train+val 做下采样（X, y, t 一起动）
-    X_trv_bal, y_trv_bal, t_trv_bal = balance_classes(X_trv, y_trv, t_trv)
+    X_trv_bal, y_trv_bal, t_trv_bal = balance_classes(X_trv, y_trv, t_trv, sample_counts=[95220, 21252, 87187])
 
     # 2.5 
     X_test_trun, y_test_trun, t_test_trun = shuffle_trun_dataset(X_test, y_test, t_test, trun = 1000)
