@@ -1,0 +1,68 @@
+================================================================================
+总样本数 total records: 1000
+可用于评估的样本数 valid records: 1000
+方向预测准确率 accuracy (on valid) = 0.4100
+
+混淆矩阵 Confusion Matrix (rows=true, cols=pred):
+                  up      flat      down
+      up         0         0       480   | sum=480
+    flat         0         0       110   | sum=110
+    down         0         0       410   | sum=410
+
+每类指标 Per-class metrics:
+   label         P         R        F1   support
+      up    0.0000    0.0000    0.0000       480
+    flat    0.0000    0.0000    0.0000       110
+    down    0.4100    1.0000    0.5816       410
+
+部分错例 (最多展示 10 条)：
+--------------------------------------------------------------------------------
+id = 7
+true label = up, pred label = down
+[GT  reason] 
+[Pred reason] 
+--------------------------------------------------------------------------------
+id = 8
+true label = up, pred label = down
+[GT  reason] 
+[Pred reason] 
+--------------------------------------------------------------------------------
+id = 9
+true label = up, pred label = down
+[GT  reason] 
+[Pred reason] 
+--------------------------------------------------------------------------------
+id = 10
+true label = up, pred label = down
+[GT  reason] 
+[Pred reason] 
+--------------------------------------------------------------------------------
+id = 12
+true label = up, pred label = down
+[GT  reason] 
+[Pred reason] 
+--------------------------------------------------------------------------------
+id = 15
+true label = up, pred label = down
+[GT  reason] 
+[Pred reason] 
+--------------------------------------------------------------------------------
+id = 16
+true label = up, pred label = down
+[GT  reason] 
+[Pred reason] 
+--------------------------------------------------------------------------------
+id = 18
+true label = up, pred label = down
+[GT  reason] 
+[Pred reason] 
+--------------------------------------------------------------------------------
+id = 19
+true label = up, pred label = down
+[GT  reason] 
+[Pred reason] 
+--------------------------------------------------------------------------------
+id = 22
+true label = flat, pred label = down
+[GT  reason] 
+[Pred reason] 

@@ -153,17 +153,16 @@ def build_single_sample(idx: int,
         "你是一名量化分析师，擅长分析中国A股K线图。\n"
         "现在给你的是中国A股过去90个交易日的日K线图。\n"
         "你的任务是判断接下来10个交易日的总体价格走势："
-        "相比当前价格是上涨(up)、下跌(down)，还是大致震荡(flat)，"
-        "并给出简要理由。\n"
-        "请只输出一个JSON，字段仅包括\"label\"。"
-        "其中 label ∈ {\"up\",\"flat\",\"down\"}，"
+        "相比当前价格是上涨(up)、下跌(down)，还是大致震荡(flat)。\n"
+        "请重点关注价格趋势、波动幅度和成交量变化等信息。\n"
+        "label 仅在 {\"up\", \"flat\", \"down\"} 之中。"
     )
-
+    
     user_text = (
         "下面的图片是中国A股过去90个交易日的日K线图。\n"
-        "请根据图形判断未来10日的总体价格方向"
-        "最终以JSON形式返回（只包含label一个字段）。"
+        "请根据图形判断未来10日的总体价格方向是上涨、下跌还是震荡。"
     )
+
 
     reason = generate_reason(label, x_window)
     assistant_json = json.dumps(

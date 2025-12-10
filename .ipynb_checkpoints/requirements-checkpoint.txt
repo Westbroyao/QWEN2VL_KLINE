@@ -12,3 +12,5 @@ bitsandbytes
 qwen-vl-utils
 torchvision
 hf_transfer
+modelscope
+scikit-learn

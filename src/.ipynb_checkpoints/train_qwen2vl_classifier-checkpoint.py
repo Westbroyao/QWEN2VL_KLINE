@@ -23,7 +23,7 @@ from transformers import (
     TrainerCallback
 )
 
-from peft import LoraConfig, get_peft_model
+from peft import LoraConfig, get_peft_model, PeftModel
 from qwen_vl_utils import process_vision_info
 
 
@@ -146,6 +146,15 @@ class QwenVLForKlineClassification(nn.Module):
             "loss": loss,
             "logits": logits,
         }
+    def save_pretrained(self, save_directory):
+        os.makedirs(save_directory, exist_ok=True)
+        # 1) 让 PeftModel 存它自己的 adapter（小）
+        self.base_model.save_pretrained(save_directory)
+        # 2) 再把分类头单独存一下
+        torch.save(
+            self.classifier.state_dict(),
+            os.path.join(save_directory, "classifier.pt")
+        )
 
 
 
@@ -230,6 +239,65 @@ def collect_eval_probs_tensor(
 
     return result
 
+
+def load_kline_cls_model(
+    ckpt_dir: str,
+    base_model_dir: str = MODEL_DIR,
+    use_4bit: bool = USE_4BIT,
+    device_map: str = DEVICE_MAP,
+):
+    """
+    从保存好的 checkpoint 目录加载：
+    - 原始 Qwen2-VL 基座模型（base_model_dir）
+    - LoRA adapter（ckpt_dir）
+    - 分类头 classifier.pt（ckpt_dir）
+    并返回：
+    - 已经包好分类头的 model（QwenVLForKlineClassification）
+    - 对应的 processor
+    """
+
+    # 1) 构建量化配置（要和训练时一致）
+    quant_config = None
+    if use_4bit:
+        quant_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16,
+        )
+
+    # 2) 加载原始 Qwen2-VL 基座
+    base_model = Qwen2VLForConditionalGeneration.from_pretrained(
+        base_model_dir,
+        torch_dtype="auto",
+        device_map=device_map,
+        quantization_config=quant_config,
+    )
+
+    # 3) 把 LoRA adapter 从 ckpt_dir 挂上去
+    #    注意：这里的 ckpt_dir 就是你当时 model.save_pretrained(...) 的目录
+    base_model = PeftModel.from_pretrained(
+        base_model,
+        ckpt_dir,
+    )
+
+    # 4) 包装成分类模型
+    cls_model = QwenVLForKlineClassification(base_model, num_labels=3)
+
+    # 5) 加载分类头权重
+    classifier_path = os.path.join(ckpt_dir, "classifier.pt")
+    state = torch.load(classifier_path, map_location="cpu")
+    cls_model.classifier.load_state_dict(state)
+
+    # 6) 加载 processor（你之前 save_pretrained 到同一个目录了）
+    processor = AutoProcessor.from_pretrained(ckpt_dir)
+
+    # 7) 搬到正确设备（如果用了 device_map="auto"，主要是处理一些非权重 buffer）
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    cls_model.to(device)
+
+    cls_model.eval()
+    return cls_model, processor
 
 
 
@@ -557,6 +625,34 @@ class CSVLoggingCallback(TrainerCallback):
             self.file.close()
 
 
+class SmallCheckpointCallback(TrainerCallback):
+    """
+    每 save_steps 步，用 model.save_pretrained(save_dir/checkpoint-XXX)
+    存一份“小 checkpoint”（只含 LoRA + classifier）。
+    """
+
+    def __init__(self, output_dir: str, save_steps: int = 2000):
+        self.output_dir = output_dir
+        self.save_steps = save_steps
+
+    def on_step_end(self, args, state, control, **kwargs):
+        # global_step 从 1 开始
+        step = state.global_step
+        if step <= 0:
+            return
+
+        if step % self.save_steps == 0:
+            model = kwargs.get("model", None)
+            if model is None:
+                return
+
+            ckpt_dir = os.path.join(self.output_dir, f"checkpoint-{step}")
+            os.makedirs(ckpt_dir, exist_ok=True)
+            print(f"[SmallCheckpointCallback] Saving small checkpoint to {ckpt_dir}")
+            model.save_pretrained(ckpt_dir)
+
+
+
 # ----------------- 保存验证集输出结果留待评测 -----------------
 
 class EvalPromptDataset(Dataset):
@@ -785,6 +881,14 @@ def parse_args():
     parser.add_argument("--grad_accum", type=int, default=GRAD_ACCUM)
     parser.add_argument("--learning_rate", type=float, default=LR)
     parser.add_argument("--warmup_ratio", type=float, default=WARMUP_RATIO)
+
+    parser.add_argument(
+        "--resume_from",
+        type=str,
+        default=None,
+        help="如果不为空，则从该目录加载 LoRA+classifier 权重后继续训练",
+    )
+    
     return parser.parse_args()
 
 
@@ -800,7 +904,17 @@ def main():
     raw_datasets = load_dataset("json", data_files=data_files)
 
     # 2. 加载模型 + processor
-    model, processor = load_model_and_processor()
+    if args.resume_from is not None:
+        print(f"[Info] Resume training: loading model & processor from {args.resume_from}")
+        model, processor = load_kline_cls_model(
+            ckpt_dir=args.resume_from,
+            base_model_dir=MODEL_DIR,
+            use_4bit=USE_4BIT,
+            device_map=DEVICE_MAP,
+        )
+    else:
+        print("[Info] Training from scratch, loading base model + init LoRA")
+        model, processor = load_model_and_processor()
 
     # 3. 包装成自定义 Dataset
     train_dataset = QwenKlineDataset(raw_datasets["train"], processor)
@@ -819,16 +933,21 @@ def main():
         learning_rate=args.learning_rate,
         warmup_ratio=args.warmup_ratio,
         logging_steps=500,
-        save_steps=2000,
+
+        # 重点：不让 Trainer 自己存大 checkpoint
+        save_strategy="no",
+        save_total_limit=1,          # 无所谓了，反正不存
+
         eval_strategy="steps",
         eval_steps=2000,
-        save_total_limit=2,
+
         bf16=True if torch.cuda.is_available() else False,
         fp16=False,
-        report_to=[],  # 不接 wandb / tensorboard 的话就留空
+        report_to=[],
         dataloader_num_workers=16,
         dataloader_pin_memory=True,
     )
+
 
     # 5. Trainer
     log_csv_path = os.path.join(training_args.output_dir, "train_eval_log.csv")
@@ -839,9 +958,11 @@ def main():
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         data_collator=data_collator,
-        callbacks=[CSVLoggingCallback(log_csv_path)],
+        callbacks=[
+            CSVLoggingCallback(log_csv_path),
+            SmallCheckpointCallback(output_dir=args.output_dir, save_steps=2000),
+        ],
     )
-
 
     # 6. 开始训练
 
@@ -886,8 +1007,8 @@ def main():
 
     
 
-    # 8. 保存 LoRA 权重和 processor
-    trainer.save_model(args.output_dir)
+    # 8. 保存 LoRA + classifier + processor（小 checkpoint）
+    model.save_pretrained(args.output_dir)     # 调用的是你在 wrapper 里重写的那个
     processor.save_pretrained(args.output_dir)
     print("训练完成，模型已保存到", args.output_dir)
 

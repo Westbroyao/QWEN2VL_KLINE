@@ -1,0 +1,31 @@
+[Info] Loading probs tensor from /root/autodl-tmp/QWEN2VL_KLINE/experiments/qwen2vl_kline_lora/test_probs.pt
+=== 基本信息 ===
+样本数: 1000
+整体 Accuracy: 0.4040
+
+=== 每类 precision / recall / f1 ===
+              precision    recall  f1-score   support
+
+          up     0.5000    0.0181    0.0350       496
+        down     0.4022    0.9801    0.5704       403
+        flat     0.0000    0.0000    0.0000       101
+
+    accuracy                         0.4040      1000
+   macro avg     0.3007    0.3328    0.2018      1000
+weighted avg     0.4101    0.4040    0.2472      1000
+
+=== 混淆矩阵 ===
+行: true (up, down, flat)   列: pred (up, down, flat)
+[[  9 487   0]
+ [  8 395   0]
+ [  1 100   0]]
+
+=== 标签分布对比 ===
+真实标签分布:
+     up:    496 (49.60%)
+   down:    403 (40.30%)
+   flat:    101 (10.10%)
+预测标签分布:
+     up:     18 (1.80%)
+   down:    982 (98.20%)
+

@@ -5,14 +5,14 @@ from typing import List, Dict, Any
 
 # ======== 配置区域，根据你自己的路径改一下 ========
 
-NPZ_PATH = "data_proc/windows_30_5_multi_with_labels_train_val_resampling.npz"   # 含 X / y / labels 的 npz
-IMAGE_DIR = "data_images/kline_windows"                     # 存放K线图的文件夹
-OUT_TRAIN_JSONL = "data_train/train.jsonl"
+NPZ_PATH = "data_proc/windows_30_5_multi_with_labels_test_resampling.npz"   # 含 X / y / labels 的 npz
+IMAGE_DIR = "data_test/images"                     # 存放K线图的文件夹
+OUT_TRAIN_JSONL = "data_test/test.jsonl"
 OUT_VAL_JSONL = "data_train/val.jsonl"
 
-TRAIN_RATIO = 0.9       # 训练/验证划分比例
+TRAIN_RATIO = 1       # 训练/验证划分比例
 RANDOM_SEED = 42        # 保证可复现
-DATA_NUMBER = 300000       # 先拿小样本测试
+DATA_NUMBER = 100000       # 先拿小样本测试
 
 # 生成的图片文件名格式（和你画图脚本保持一致）
 # 之前画图脚本里是：window_{i:05d}{label_part}.png，其中 label_part 形如 "_up"
@@ -153,17 +153,16 @@ def build_single_sample(idx: int,
         "你是一名量化分析师，擅长分析中国A股K线图。\n"
         "现在给你的是中国A股过去90个交易日的日K线图。\n"
         "你的任务是判断接下来10个交易日的总体价格走势："
-        "相比当前价格是上涨(up)、下跌(down)，还是大致震荡(flat)，"
-        "并给出简要理由。\n"
-        "请只输出一个JSON，字段仅包括\"label\"。"
-        "其中 label ∈ {\"up\",\"flat\",\"down\"}，"
+        "相比当前价格是上涨(up)、下跌(down)，还是大致震荡(flat)。\n"
+        "请重点关注价格趋势、波动幅度和成交量变化等信息。\n"
+        "label 仅在 {\"up\", \"flat\", \"down\"} 之中。"
     )
-
+    
     user_text = (
         "下面的图片是中国A股过去90个交易日的日K线图。\n"
-        "请根据图形判断未来10日的总体价格方向"
-        "最终以JSON形式返回（只包含label一个字段）。"
+        "请根据图形判断未来10日的总体价格方向是上涨、下跌还是震荡。"
     )
+
 
     reason = generate_reason(label, x_window)
     assistant_json = json.dumps(
@@ -265,7 +264,7 @@ def main():
     )
 
     save_jsonl(train_samples, OUT_TRAIN_JSONL)
-    save_jsonl(val_samples, OUT_VAL_JSONL)
+    # save_jsonl(val_samples, OUT_VAL_JSONL)
 
 
 if __name__ == "__main__":
