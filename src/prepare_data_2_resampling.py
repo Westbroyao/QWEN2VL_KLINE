@@ -164,7 +164,7 @@ def main():
     X_trv, y_trv, t_trv, X_test, y_test, t_test = split_data(X, y, t)
 
     # 2. 只对 train+val 做下采样（X, y, t 一起动）
-    X_trv_bal, y_trv_bal, t_trv_bal = balance_classes(X_trv, y_trv, t_trv, sample_counts=[95220, 21252, 87187])
+    X_trv_bal, y_trv_bal, t_trv_bal = balance_classes(X_trv, y_trv, t_trv, sample_counts=[74725, 61090, 67844])
 
     # 2.5 
     X_test_trun, y_test_trun, t_test_trun = shuffle_trun_dataset(X_test, y_test, t_test, trun = 1000)

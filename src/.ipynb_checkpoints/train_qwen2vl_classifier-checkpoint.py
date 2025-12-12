@@ -939,7 +939,7 @@ def main():
         save_total_limit=1,          # 无所谓了，反正不存
 
         eval_strategy="steps",
-        eval_steps=2000,
+        eval_steps=5000,
 
         bf16=True if torch.cuda.is_available() else False,
         fp16=False,
@@ -960,7 +960,7 @@ def main():
         data_collator=data_collator,
         callbacks=[
             CSVLoggingCallback(log_csv_path),
-            SmallCheckpointCallback(output_dir=args.output_dir, save_steps=2000),
+            SmallCheckpointCallback(output_dir=args.output_dir, save_steps=5000),
         ],
     )
 
